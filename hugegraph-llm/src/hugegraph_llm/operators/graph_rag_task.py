@@ -36,9 +36,108 @@ from hugegraph_llm.utils.decorators import log_time, log_operator_time, record_q
 from hugegraph_llm.config import prompt, huge_settings
 from crewai.flow.flow import Flow, start, listen
 
+# ===========================
+# Simple CrewAI Agent System
+# ===========================
+
+class BaseAgent:
+    """A simple base class for agents."""
+    def __init__(self, name: str):
+        self.name = name
+
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        log.info(f"Agent {self.name} starting execution.")
+        # Default behavior: return context unchanged.
+        return context
+
+class QueryRouterAgent(BaseAgent):
+    """Determines whether the query needs a simple lookup or multi-hop retrieval."""
+    def __init__(self):
+        super().__init__("QueryRouterAgent")
+
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        log.info("QueryRouterAgent: Analyzing query for routing.")
+        query = context.get("query", "")
+        # For demo: If query length > 20, assume multi-hop retrieval.
+        context["query_type"] = "multi-hop" if len(query) > 20 else "simple"
+        log.info(f"QueryRouterAgent: Determined query type is '{context['query_type']}'.")
+        return context
+
+class Text2GQLAgent(BaseAgent):
+    """Converts user text into a structured graph query."""
+    def __init__(self, pipeline):
+        super().__init__("Text2GQLAgent")
+        self.pipeline = pipeline
+
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        log.info("Text2GQLAgent: Converting text query to graph query.")
+        query_text = context.get("query", "")
+        # For demo, simply wrap the query text.
+        context["graph_query"] = f"GRAPH_QUERY({query_text})"
+        log.info(f"Text2GQLAgent: Generated graph query: {context['graph_query']}")
+        return context
+
+class KeywordExtractionAgent(BaseAgent):
+    """Extracts relevant keywords from the user query using NLP."""
+    def __init__(self, pipeline):
+        super().__init__("KeywordExtractionAgent")
+        self.pipeline = pipeline
+
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        log.info("KeywordExtractionAgent: Extracting keywords from query.")
+        text = context.get("query", "")
+        # For demo: split text into words and take the first 5 as keywords.
+        keywords = text.split()[:5]
+        context["keywords"] = keywords
+        log.info(f"KeywordExtractionAgent: Extracted keywords: {keywords}")
+        return context
+
+class GraphRetrievalAgent(BaseAgent):
+    """Fetches node IDs and retrieves a connected subgraph from the graph database."""
+    def __init__(self, pipeline):
+        super().__init__("GraphRetrievalAgent")
+        self.pipeline = pipeline
+
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        log.info("GraphRetrievalAgent: Retrieving graph data based on keywords.")
+        # For demo: simulate graph retrieval using the keywords.
+        keywords = context.get("keywords", [])
+        context["graph_data"] = f"GraphData(based on keywords: {keywords})"
+        log.info(f"GraphRetrievalAgent: Retrieved graph data: {context['graph_data']}")
+        return context
+
+class AnswerSynthesisAgent(BaseAgent):
+    """Generates a natural language answer from the retrieved data."""
+    def __init__(self, pipeline):
+        super().__init__("AnswerSynthesisAgent")
+        self.pipeline = pipeline
+
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        log.info("AnswerSynthesisAgent: Synthesizing answer from graph data.")
+        query = context.get("query", "")
+        graph_data = context.get("graph_data", "")
+        # For demo: construct an answer string.
+        context["answer"] = f"Synthesized answer using query '{query}' with data '{graph_data}'."
+        log.info(f"AnswerSynthesisAgent: Answer synthesized: {context['answer']}")
+        return context
+
+class AgentExecutor:
+    """A simple executor that runs a list of agents sequentially."""
+    def __init__(self, agents: List[BaseAgent]):
+        self.agents = agents
+
+    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        for agent in self.agents:
+            context = agent.run(context)
+        return context
+
+# ================================
+# RAGPipeline with CrewAI Flow
+# ================================
+
 class RAGPipeline:
     """
-    RAGPipeline is a (core)class that encapsulates a series of operations for extracting information from text,
+    RAGPipeline is a (core) class that encapsulates a series of operations for extracting information from text,
     querying graph databases and vector indices, merging and re-ranking results, and generating answers.
     """
 
@@ -297,3 +396,32 @@ class RAGPipeline:
         except Exception as e:
             log.error(f"Error executing operator {operator.__class__.__name__}: {str(e)}")
             raise
+
+    # -----------------------------------
+    # Agent System Integration (Demo)
+    # -----------------------------------
+    def run_agents(self, **kwargs) -> Dict[str, Any]:
+        """
+        Runs the query process using a simple agent system.
+        """
+        log.info("Starting agent-based execution.")
+        context = kwargs
+        # Instantiate agents with a reference to the pipeline where needed.
+        agents = [
+            QueryRouterAgent(),
+            Text2GQLAgent(self),
+            KeywordExtractionAgent(self),
+            GraphRetrievalAgent(self),
+            AnswerSynthesisAgent(self)
+        ]
+        executor = AgentExecutor(agents)
+        context = executor.execute(context)
+        log.info("Agent-based execution completed with context: {}".format(context))
+        return context
+
+    @log_time("total agent time")
+    def run_with_agents(self, **kwargs) -> Dict[str, Any]:
+        """
+        Entry point for running the pipeline using agents.
+        """
+        return self.run_agents(**kwargs)
