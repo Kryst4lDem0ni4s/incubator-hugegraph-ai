@@ -31,9 +31,10 @@ from hugegraph_llm.operators.index_op.semantic_id_query import SemanticIdQuery
 from hugegraph_llm.operators.index_op.vector_index_query import VectorIndexQuery
 from hugegraph_llm.operators.llm_op.answer_synthesize import AnswerSynthesize
 from hugegraph_llm.operators.llm_op.keyword_extract import KeywordExtract
+from pyhugegraph.utils.log import log
 from hugegraph_llm.utils.decorators import log_time, log_operator_time, record_qps
 from hugegraph_llm.config import prompt, huge_settings
-
+from crewai.flow.flow import Flow, start, listen
 
 class RAGPipeline:
     """
@@ -54,6 +55,7 @@ class RAGPipeline:
         self._embedding = embedding or Embeddings().get_embedding()
         self._operators: List[Any] = []
 
+    @start()
     def extract_word(self, text: Optional[str] = None, language: str = "english"):
         """
         Add a word extraction operator to the pipeline.
@@ -62,9 +64,12 @@ class RAGPipeline:
         :param language: Language of the text.
         :return: Self-instance for chaining.
         """
+        log.info(f"Adding WordExtract operator with text: {text} and language: {language}.")
         self._operators.append(WordExtract(text=text, language=language))
+
         return self
 
+    @listen(extract_word)
     def extract_keywords(
         self,
         text: Optional[str] = None,
@@ -91,10 +96,14 @@ class RAGPipeline:
         )
         return self
 
+    @listen(extract_keywords)
     def import_schema(self, graph_name: str):
+        log.info(f"Adding SchemaManager operator for graph: {graph_name}.")
         self._operators.append(SchemaManager(graph_name))
+
         return self
 
+    @listen(import_schema)
     def keywords_to_vid(
         self,
         by: Literal["query", "keywords"] = "keywords",
@@ -118,6 +127,7 @@ class RAGPipeline:
         )
         return self
 
+    @listen(keywords_to_vid)
     def query_graphdb(
         self,
         max_deep: int = 2,
@@ -153,6 +163,7 @@ class RAGPipeline:
         )
         return self
 
+    @listen(query_graphdb)
     def query_vector_index(self, max_items: int = 3):
         """
         Add a vector index query operator to the pipeline.
@@ -168,6 +179,7 @@ class RAGPipeline:
         )
         return self
 
+    @listen(query_vector_index)
     def merge_dedup_rerank(
         self,
         graph_ratio: float = 0.5,
@@ -191,6 +203,7 @@ class RAGPipeline:
         )
         return self
 
+    @start(merge_dedup_rerank)
     def synthesize_answer(
         self,
         raw_answer: bool = False,
@@ -220,6 +233,7 @@ class RAGPipeline:
         )
         return self
 
+    @start(synthesize_answer)
     def print_result(self):
         """
         Add a print result operator to the pipeline.
@@ -241,12 +255,29 @@ class RAGPipeline:
         if len(self._operators) == 0:
             self.extract_keywords().query_graphdb().synthesize_answer()
 
-        context = kwargs
+        log.info("Running pipeline with context: {}".format(context))
+        context = kwargs        
 
-        for operator in self._operators:
-            context = self._run_operator(operator, context)
-        return context
+
+        # for operator in self._operators:            
+        #     log.info(f"Running operator: {operator.__class__.__name__}")
+
+        #     context = self._run_operator(operator, context)
+        # return context
+    
+        # Use CrewAI Flow to manage operator execution
+        flow = Flow()  # Instantiate CrewAI's Flow object
+
+        # Run the flow with the current context
+        context = flow.kickoff(context)        
+        # log.info(f"Completed operator: {operator.__class__.__name__} with context: {context}")
+        log.info("Pipeline run completed with final context: {}".format(context))
+        return context        
 
     @log_operator_time
     def _run_operator(self, operator, context):
-        return operator.run(context)
+        log.info(f"Executing operator: {operator.__class__.__name__}")
+
+        result = operator.run(context)
+        log.info(f"Operator {operator.__class__.__name__} executed successfully.")
+        return result
