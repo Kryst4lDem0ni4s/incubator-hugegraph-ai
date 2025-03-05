@@ -438,7 +438,7 @@ class GraphRAGQuery:
 # CrewAI Agents & Workflow Integration (CrewAI Demo)
 # ------------------------------------------------------------
 from crewai.agents.crew_agent_executor import CrewAgentExecutor, BaseAgent as CrewBaseAgent
-from crewai.flow.flow import start, listen, kickoff
+from crewai.flow.flow import start, listen
 
 class QueryRouterAgent(CrewBaseAgent):
     """Decides which query approach to use based on the query's characteristics."""
@@ -477,14 +477,22 @@ class SubgraphQueryAgent(CrewBaseAgent):
 
 class AnswerSynthesisAgent(CrewBaseAgent):
     """Synthesizes the final answer using the graph results."""
-    @listen(GremlinQueryAgent.run, SubgraphQueryAgent.run)
+    @listen(QueryRouterAgent.run)  # Change to listen to only QueryRouterAgent
+
     def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        if context.get("graph_result"):
+        if context.get("query_route") == "simple" and context.get("graph_result"):
+            log.info("AnswerSynthesisAgent: Synthesizing answer using graph results from Gremlin query.")
+            context["answer"] = f"Synthesized answer based on: {context.get('graph_result')}"
+        elif context.get("query_route") == "multi":
+            log.info("AnswerSynthesisAgent: Synthesizing answer using graph results from Subgraph query.")
+            context["answer"] = f"Synthesized answer based on subgraph results."
+
             log.info("AnswerSynthesisAgent: Synthesizing answer using graph results.")
             # Here you can integrate your AnswerSynthesize logic.
             context["answer"] = f"Synthesized answer based on: {context.get('graph_result')}"
         else:
             log.info("AnswerSynthesisAgent: No graph results to synthesize answer.")
+
         return context
 
 def run_with_agents(self, context: Dict[str, Any]) -> Dict[str, Any]:
