@@ -16,6 +16,7 @@
 # under the License.
 
 import json
+import time
 from typing import Any, Dict, Optional, List, Set, Tuple
 
 from hugegraph_llm.config import huge_settings, prompt
@@ -87,7 +88,9 @@ class GraphRAGQuery:
         num_gremlin_generate_example: Optional[int] = 1,
         gremlin_prompt: Optional[str] = None,
     ):
+        log.info("Initializing GraphRAGQuery with parameters: max_deep=%d, max_graph_items=%d, prop_to_match=%s, llm=%s, embedding=%s, max_v_prop_len=%d, max_e_prop_len=%d, num_gremlin_generate_example=%d, gremlin_prompt=%s", max_deep, max_graph_items, prop_to_match)
         self._client = PyHugeClient(
+
             huge_settings.graph_ip,
             huge_settings.graph_port,
             huge_settings.graph_name,
@@ -115,7 +118,13 @@ class GraphRAGQuery:
         # initial flag: -1 means no result, 0 means subgraph query, 1 means gremlin query
         context["graph_result_flag"] = -1
         # 1. Try to perform a query based on the generated gremlin
+        log.info("Running gremlin generate query with context: %s", context)
+        
+        start_time = time.time()
         context = self._gremlin_generate_query(context)
+        log.info("Gremlin generate query completed in %.2f seconds.", time.time() - start_time)
+
+
         # 2. Try to perform a query based on subgraph-search if the previous query failed
         if not context.get("graph_result"):
             context = self._subgraph_query(context)
@@ -153,12 +162,15 @@ class GraphRAGQuery:
                     f"The following are graph query result " f"from gremlin query `{gremlin}`.\n"
                 )
         except Exception as e:  # pylint: disable=broad-except
-            log.error(e)
+            log.error("Error executing gremlin query: %s", e)
+
             context["graph_result"] = ""
         return context
 
     def _subgraph_query(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        log.info("Extracting parameters from context for subgraph query.")
         # 1. Extract params from context
+
         matched_vids = context.get("match_vids")
         if isinstance(context.get("max_deep"), int):
             self._max_deep = context["max_deep"]
@@ -179,6 +191,8 @@ class GraphRAGQuery:
                 return context
 
             gremlin_query = VERTEX_QUERY_TPL.format(keywords=matched_vids)
+            log.debug("Vertex query gremlin query: %s", gremlin_query)
+
             vertexes = self._client.gremlin().exec(gremlin=gremlin_query)["data"]
             log.debug("Vids gremlin query: %s", gremlin_query)
 
@@ -194,6 +208,8 @@ class GraphRAGQuery:
                     max_items=self._max_items,
                 )
                 log.debug("Kneighbor gremlin query: %s", gremlin_query)
+                log.info("Executing Kneighbor query for matched_vid: %s", matched_vid)
+
                 paths.extend(self._client.gremlin().exec(gremlin=gremlin_query)["data"])
 
             graph_chain_knowledge, vertex_degree_list, knowledge_with_degree = self._format_graph_query_result(
@@ -227,7 +243,10 @@ class GraphRAGQuery:
                 query_paths=paths
             )
 
+        log.info("Subgraph query results obtained, total results: %d, results: %s", len(graph_chain_knowledge), graph_chain_knowledge)
+
         context["graph_result"] = list(graph_chain_knowledge)
+
         if context["graph_result"]:
             context["graph_result_flag"] = 0
             context["vertex_degree_list"] = [list(vertex_degree) for vertex_degree in vertex_degree_list]
@@ -473,7 +492,10 @@ def run_with_agents(self, context: Dict[str, Any]) -> Dict[str, Any]:
     Run the GraphRAGQuery process using an enhanced CrewAI agent workflow.
     The workflow uses CrewAI decorators to create dependencies and autonomous decisions.
     """
-    log.info("CrewAI Agent Workflow: Starting enhanced agent flow for GraphRAGQuery.")
+    log.info("CrewAI Agent Workflow: Starting enhanced agent flow for GraphRAGQuery with agents: %s", agents)
+    log.debug("Agents to be invoked: %s", agents)
+    
+    start_time = time.time()
     # Inject a reference to self so agents can call internal methods.
     context["graph_obj"] = self
 
@@ -487,5 +509,7 @@ def run_with_agents(self, context: Dict[str, Any]) -> Dict[str, Any]:
     
     # Create a CrewAgentExecutor and kickoff the flow.
     CrewAgentExecutor.invoke(agents)
-    log.info("CrewAI Agent Workflow: Completed execution. Final context: %s", context)
+    log.info("CrewAI Agent Workflow: Completed execution in %.2f seconds. Final context: %s", time.time() - start_time, context)
+    log.debug("Final context details: %s", context)
+
     return context
