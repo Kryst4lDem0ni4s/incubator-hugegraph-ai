@@ -43,6 +43,8 @@ class RAGPipeline:
     """
 
     def __init__(self, llm: Optional[BaseLLM] = None, embedding: Optional[BaseEmbedding] = None):
+        log.info("Initializing RAGPipeline with LLM: {} and Embedding: {}".format(llm, embedding))
+
         """
         Initialize the RAGPipeline with optional LLM and embedding models.
 
@@ -65,6 +67,8 @@ class RAGPipeline:
         :return: Self-instance for chaining.
         """
         log.info(f"Adding WordExtract operator with text: {text} and language: {language}.")
+        log.info("WordExtract operator added successfully.")
+
         self._operators.append(WordExtract(text=text, language=language))
 
         return self
@@ -86,6 +90,7 @@ class RAGPipeline:
         :param extract_template: Template for keyword extraction.
         :return: Self-instance for chaining.
         """
+        log.info("Adding KeywordExtract operator with text: {}, max_keywords: {}, language: {}, extract_template: {}.".format(text, max_keywords, language, extract_template))
         self._operators.append(
             KeywordExtract(
                 text=text,
@@ -94,13 +99,14 @@ class RAGPipeline:
                 extract_template=extract_template,
             )
         )
+        log.info("KeywordExtract operator added successfully.")
         return self
 
     @listen(extract_keywords)
     def import_schema(self, graph_name: str):
         log.info(f"Adding SchemaManager operator for graph: {graph_name}.")
         self._operators.append(SchemaManager(graph_name))
-
+        log.info("SchemaManager operator added successfully.")
         return self
 
     @listen(import_schema)
@@ -117,6 +123,7 @@ class RAGPipeline:
         :param topk_per_query: Top K results per query.
         :return: Self-instance for chaining.
         """
+        log.info("Adding SemanticIdQuery operator with by: {}, topk_per_keyword: {}, topk_per_query: {}.".format(by, topk_per_keyword, topk_per_query))
         self._operators.append(
             SemanticIdQuery(
                 embedding=self._embedding,
@@ -125,6 +132,7 @@ class RAGPipeline:
                 topk_per_query=topk_per_query,
             )
         )
+        log.info("SemanticIdQuery operator added successfully.")
         return self
 
     @listen(keywords_to_vid)
@@ -150,6 +158,7 @@ class RAGPipeline:
         :param gremlin_prompt: Gremlin prompt for generating examples.
         :return: Self-instance for chaining.
         """
+        log.info("Adding GraphRAGQuery operator with max_deep: {}, max_graph_items: {}, max_v_prop_len: {}, max_e_prop_len: {}, prop_to_match: {}, num_gremlin_generate_example: {}.".format(max_deep, max_graph_items, max_v_prop_len, max_e_prop_len, prop_to_match, num_gremlin_generate_example))
         self._operators.append(
             GraphRAGQuery(
                 max_deep=max_deep,
@@ -161,6 +170,7 @@ class RAGPipeline:
                 gremlin_prompt=gremlin_prompt,
             )
         )
+        log.info("GraphRAGQuery operator added successfully.")
         return self
 
     @listen(query_graphdb)
@@ -171,12 +181,14 @@ class RAGPipeline:
         :param max_items: Maximum number of items to retrieve.
         :return: Self-instance for chaining.
         """
+        log.info("Adding VectorIndexQuery operator with max_items: {}.".format(max_items))
         self._operators.append(
             VectorIndexQuery(
                 embedding=self._embedding,
                 topk=max_items,
             )
         )
+        log.info("VectorIndexQuery operator added successfully.")
         return self
 
     @listen(query_vector_index)
@@ -192,6 +204,7 @@ class RAGPipeline:
 
         :return: Self-instance for chaining.
         """
+        log.info("Adding MergeDedupRerank operator with graph_ratio: {}, rerank_method: {}, near_neighbor_first: {}, custom_related_information: {}.".format(graph_ratio, rerank_method, near_neighbor_first, custom_related_information))
         self._operators.append(
             MergeDedupRerank(
                 embedding=self._embedding,
@@ -201,6 +214,7 @@ class RAGPipeline:
                 custom_related_information=custom_related_information,
             )
         )
+        log.info("MergeDedupRerank operator added successfully.")
         return self
 
     @start(merge_dedup_rerank)
@@ -255,7 +269,7 @@ class RAGPipeline:
         if len(self._operators) == 0:
             self.extract_keywords().query_graphdb().synthesize_answer()
 
-        log.info("Running pipeline with context: {}".format(context))
+        log.info("Running pipeline with context: {}".format(kwargs))
         context = kwargs        
 
 
@@ -270,14 +284,16 @@ class RAGPipeline:
 
         # Run the flow with the current context
         context = flow.kickoff(context)        
-        # log.info(f"Completed operator: {operator.__class__.__name__} with context: {context}")
         log.info("Pipeline run completed with final context: {}".format(context))
         return context        
 
     @log_operator_time
     def _run_operator(self, operator, context):
         log.info(f"Executing operator: {operator.__class__.__name__}")
-
-        result = operator.run(context)
-        log.info(f"Operator {operator.__class__.__name__} executed successfully.")
-        return result
+        try:
+            result = operator.run(context)
+            log.info(f"Operator {operator.__class__.__name__} executed successfully.")
+            return result
+        except Exception as e:
+            log.error(f"Error executing operator {operator.__class__.__name__}: {str(e)}")
+            raise
