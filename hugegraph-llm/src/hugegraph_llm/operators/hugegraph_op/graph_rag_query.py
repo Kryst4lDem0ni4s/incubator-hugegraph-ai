@@ -414,3 +414,78 @@ class GraphRAGQuery:
 
         max_len = self._max_v_prop_len if item_type == "v" else self._max_e_prop_len
         return value[:max_len] if value else value
+
+# ------------------------------------------------------------
+# CrewAI Agents & Workflow Integration (CrewAI Demo)
+# ------------------------------------------------------------
+from crewai.agents.crew_agent_executor import CrewAgentExecutor, BaseAgent as CrewBaseAgent
+from crewai.flow.flow import start, listen, kickoff
+
+class QueryRouterAgent(CrewBaseAgent):
+    """Decides which query approach to use based on the query's characteristics."""
+    @start()
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        query = context.get("query", "")
+        # For demonstration, if query length > 20 use multi-hop, else simple.
+        route = "multi" if len(query) > 20 else "simple"
+        context["query_route"] = route
+        log.info("QueryRouterAgent: Query route set to '%s'.", route)
+        return context
+
+class GremlinQueryAgent(CrewBaseAgent):
+    """Executes the gremlin-based query if the route is 'simple'."""
+    @listen(QueryRouterAgent.run)
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        if context.get("query_route") == "simple":
+            log.info("GremlinQueryAgent: Running gremlin-based query.")
+            context = context.get("graph_obj")._gremlin_generate_query(context)
+            log.info("GremlinQueryAgent: Completed gremlin query.")
+        else:
+            log.info("GremlinQueryAgent: Skipped (query route is not 'simple').")
+        return context
+
+class SubgraphQueryAgent(CrewBaseAgent):
+    """Executes the subgraph query if the route is 'multi' or if gremlin query returned no results."""
+    @listen(QueryRouterAgent.run)
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        if context.get("query_route") == "multi" or not context.get("graph_result"):
+            log.info("SubgraphQueryAgent: Running subgraph query as fallback.")
+            context = context.get("graph_obj")._subgraph_query(context)
+            log.info("SubgraphQueryAgent: Completed subgraph query.")
+        else:
+            log.info("SubgraphQueryAgent: Skipped (gremlin query provided results).")
+        return context
+
+class AnswerSynthesisAgent(CrewBaseAgent):
+    """Synthesizes the final answer using the graph results."""
+    @listen(GremlinQueryAgent.run, SubgraphQueryAgent.run)
+    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        if context.get("graph_result"):
+            log.info("AnswerSynthesisAgent: Synthesizing answer using graph results.")
+            # Here you can integrate your AnswerSynthesize logic.
+            context["answer"] = f"Synthesized answer based on: {context.get('graph_result')}"
+        else:
+            log.info("AnswerSynthesisAgent: No graph results to synthesize answer.")
+        return context
+
+def run_with_agents(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Run the GraphRAGQuery process using an enhanced CrewAI agent workflow.
+    The workflow uses CrewAI decorators to create dependencies and autonomous decisions.
+    """
+    log.info("CrewAI Agent Workflow: Starting enhanced agent flow for GraphRAGQuery.")
+    # Inject a reference to self so agents can call internal methods.
+    context["graph_obj"] = self
+
+    # Instantiate the agents.
+    agents = [
+        QueryRouterAgent(),
+        GremlinQueryAgent(),
+        SubgraphQueryAgent(),
+        AnswerSynthesisAgent()
+    ]
+    
+    # Create a CrewAgentExecutor and kickoff the flow.
+    CrewAgentExecutor.invoke(agents)
+    log.info("CrewAI Agent Workflow: Completed execution. Final context: %s", context)
+    return context
