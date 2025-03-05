@@ -457,7 +457,7 @@ class GremlinQueryAgent(CrewBaseAgent):
     def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
         if context.get("query_route") == "simple":
             log.info("GremlinQueryAgent: Running gremlin-based query.")
-            context = context.get("graph_obj")._gremlin_generate_query(context)
+            context = GraphRAGQuery._gremlin_generate_query(context)
             log.info("GremlinQueryAgent: Completed gremlin query.")
         else:
             log.info("GremlinQueryAgent: Skipped (query route is not 'simple').")
@@ -469,7 +469,7 @@ class SubgraphQueryAgent(CrewBaseAgent):
     def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
         if context.get("query_route") == "multi" or not context.get("graph_result"):
             log.info("SubgraphQueryAgent: Running subgraph query as fallback.")
-            context = context.get("graph_obj")._subgraph_query(context)
+            context = GraphRAGQuery._subgraph_query(context)
             log.info("SubgraphQueryAgent: Completed subgraph query.")
         else:
             log.info("SubgraphQueryAgent: Skipped (gremlin query provided results).")
