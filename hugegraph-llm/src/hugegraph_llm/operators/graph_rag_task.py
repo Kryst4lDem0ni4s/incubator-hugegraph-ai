@@ -36,105 +36,6 @@ from hugegraph_llm.utils.decorators import log_time, log_operator_time, record_q
 from hugegraph_llm.config import prompt, huge_settings
 from crewai.flow.flow import Flow, start, listen
 
-# ===========================
-# Simple CrewAI Agent System
-# ===========================
-
-class BaseAgent:
-    """A simple base class for agents."""
-    def __init__(self, name: str):
-        self.name = name
-
-    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        log.info(f"Agent {self.name} starting execution.")
-        # Default behavior: return context unchanged.
-        return context
-
-class QueryRouterAgent(BaseAgent):
-    """Determines whether the query needs a simple lookup or multi-hop retrieval."""
-    def __init__(self):
-        super().__init__("QueryRouterAgent")
-
-    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        log.info("QueryRouterAgent: Analyzing query for routing.")
-        query = context.get("query", "")
-        # For demo: If query length > 20, assume multi-hop retrieval.
-        context["query_type"] = "multi-hop" if len(query) > 20 else "simple"
-        log.info(f"QueryRouterAgent: Determined query type is '{context['query_type']}'.")
-        return context
-
-class Text2GQLAgent(BaseAgent):
-    """Converts user text into a structured graph query."""
-    def __init__(self, pipeline):
-        super().__init__("Text2GQLAgent")
-        self.pipeline = pipeline
-
-    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        log.info("Text2GQLAgent: Converting text query to graph query.")
-        query_text = context.get("query", "")
-        # For demo, simply wrap the query text.
-        context["graph_query"] = f"GRAPH_QUERY({query_text})"
-        log.info(f"Text2GQLAgent: Generated graph query: {context['graph_query']}")
-        return context
-
-class KeywordExtractionAgent(BaseAgent):
-    """Extracts relevant keywords from the user query using NLP."""
-    def __init__(self, pipeline):
-        super().__init__("KeywordExtractionAgent")
-        self.pipeline = pipeline
-
-    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        log.info("KeywordExtractionAgent: Extracting keywords from query.")
-        text = context.get("query", "")
-        # For demo: split text into words and take the first 5 as keywords.
-        keywords = text.split()[:5]
-        context["keywords"] = keywords
-        log.info(f"KeywordExtractionAgent: Extracted keywords: {keywords}")
-        return context
-
-class GraphRetrievalAgent(BaseAgent):
-    """Fetches node IDs and retrieves a connected subgraph from the graph database."""
-    def __init__(self, pipeline):
-        super().__init__("GraphRetrievalAgent")
-        self.pipeline = pipeline
-
-    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        log.info("GraphRetrievalAgent: Retrieving graph data based on keywords.")
-        # For demo: simulate graph retrieval using the keywords.
-        keywords = context.get("keywords", [])
-        context["graph_data"] = f"GraphData(based on keywords: {keywords})"
-        log.info(f"GraphRetrievalAgent: Retrieved graph data: {context['graph_data']}")
-        return context
-
-class AnswerSynthesisAgent(BaseAgent):
-    """Generates a natural language answer from the retrieved data."""
-    def __init__(self, pipeline):
-        super().__init__("AnswerSynthesisAgent")
-        self.pipeline = pipeline
-
-    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        log.info("AnswerSynthesisAgent: Synthesizing answer from graph data.")
-        query = context.get("query", "")
-        graph_data = context.get("graph_data", "")
-        # For demo: construct an answer string.
-        context["answer"] = f"Synthesized answer using query '{query}' with data '{graph_data}'."
-        log.info(f"AnswerSynthesisAgent: Answer synthesized: {context['answer']}")
-        return context
-
-class AgentExecutor:
-    """A simple executor that runs a list of agents sequentially."""
-    def __init__(self, agents: List[BaseAgent]):
-        self.agents = agents
-
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        for agent in self.agents:
-            context = agent.run(context)
-        return context
-
-# ================================
-# RAGPipeline with CrewAI Flow
-# ================================
-
 class RAGPipeline:
     """
     RAGPipeline is a (core) class that encapsulates a series of operations for extracting information from text,
@@ -142,219 +43,411 @@ class RAGPipeline:
     """
 
     def __init__(self, llm: Optional[BaseLLM] = None, embedding: Optional[BaseEmbedding] = None):
-        log.info("Initializing RAGPipeline with LLM: {} and Embedding: {}".format(llm, embedding))
-
         """
         Initialize the RAGPipeline with optional LLM and embedding models.
 
         :param llm: Optional LLM model to use.
         :param embedding: Optional embedding model to use.
         """
+        
+        log.info("Initializing RAGPipeline with LLM: {} and Embedding: {}".format(llm, embedding))
+        
         self._chat_llm = llm or LLMs().get_chat_llm()
         self._extract_llm = llm or LLMs().get_extract_llm()
         self._text2gqlt_llm = llm or LLMs().get_text2gql_llm()
         self._embedding = embedding or Embeddings().get_embedding()
         self._operators: List[Any] = []
+        
+    class BaseAgent:
+        """A simple base class for agents."""
+        def __init__(self, name: str):
+            super.__init__()
+            self.name = name
 
-    @start()
-    def extract_word(self, text: Optional[str] = None, language: str = "english"):
-        """
-        Add a word extraction operator to the pipeline.
+        
+        def run_agents(self, **kwargs) -> Dict[str, Any]:
+            """
+            Runs the query process using a simple agent system.
+            """
+            log.info("Starting agent-based execution.")
+            context = kwargs
+            # Instantiate agents with a reference to the pipeline where needed.
+            agents = [
+                RAGPipeline.WordExtractAgent(self),
+                RAGPipeline.KeywordExtractAgent(self),
+                RAGPipeline.SchemaManagerAgent(self),
+                RAGPipeline.SemanticIdQueryAgent(self),
+                RAGPipeline.GraphQueryAgent(self),
+                RAGPipeline.VectorIndexAgent(self),
+                RAGPipeline.MergeDedupRerankAgent(self),
+                RAGPipeline.AnswerSynthesisAgent(self),
+                RAGPipeline.PrintResultAgent(self),
+            ]
+            executor = RAGPipeline.AgentExecutor(agents)
+            context = executor.execute(context)
+            log.info("Agent-based execution completed with context: {}".format(context))
+            return context
 
-        :param text: Text to extract words from.
-        :param language: Language of the text.
-        :return: Self-instance for chaining.
-        """
-        log.info(f"Adding WordExtract operator with text: {text} and language: {language}.")
-        log.info("WordExtract operator added successfully.")
+        @log_time("total agent time")
+        def run_with_agents(self, **kwargs) -> Dict[str, Any]:
+            """
+            Entry point for running the pipeline using agents.
+            """
+            return self.run_agents(**kwargs)
+    
+    class AgentExecutor:
+        """A simple executor that runs a list of agents sequentially."""
+        def __init__(self, agents: List["RAGPipeline.BaseAgent"]):
+            self.agents = agents
 
-        self._operators.append(WordExtract(text=text, language=language))
+        def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            for agent in self.agents:
+                context = agent.run(context)
+            return context
+        
+    class WordExtractAgent(BaseAgent):
+        def __init__(self, pipeline: "RAGPipeline"):
+            self.pipeline = pipeline
+            self.name = "WordExtractAgent"
+        
+        def extract_word(self, text: Optional[str] = None, language: str = "english"):
+            """
+            Add a word extraction operator to the pipeline.
 
-        return self
+            :param text: Text to extract words from.
+            :param language: Language of the text.
+            :return: Self-instance for chaining.
+            """
+            log.info(f"Adding WordExtract operator with text: {text} and language: {language}.")
+            self.pipeline._operators.append(WordExtract(text=text, language=language))
+            log.info("WordExtract operator added successfully.")
+            
+            return self
+        
+        @start()
+        def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            log.info("WordExtractAgent: Calling extract_word()")
+            self.extract_word(text=context.get("text"), language=context.get("language", "english"))
+            operator = self.pipeline._operators[-1]
+            log.info("WordExtractAgent: Executing operator: {}".format(operator.__class__.__name__))
+            context = operator.run(context)
+            return context
+        
+    @listen(WordExtractAgent.run)
+    class KeywordExtractAgent(BaseAgent):
+        def __init__(self, pipeline: "RAGPipeline"):
+            self.pipeline = pipeline
+            self.name = "KeywordExtractAgent"
 
-    @listen(extract_word)
-    def extract_keywords(
-        self,
-        text: Optional[str] = None,
-        max_keywords: int = 5,
-        language: str = "english",
-        extract_template: Optional[str] = None,
-    ):
-        """
-        Add a keyword extraction operator to the pipeline.
+        def extract_keywords(
+            self,
+            text: Optional[str] = None,
+            max_keywords: int = 5,
+            language: str = "english",
+            extract_template: Optional[str] = None,
+        ):
+            """
+            Add a keyword extraction operator to the pipeline.
 
-        :param text: Text to extract keywords from.
-        :param max_keywords: Maximum number of keywords to extract.
-        :param language: Language of the text.
-        :param extract_template: Template for keyword extraction.
-        :return: Self-instance for chaining.
-        """
-        log.info("Adding KeywordExtract operator with text: {}, max_keywords: {}, language: {}, extract_template: {}.".format(text, max_keywords, language, extract_template))
-        self._operators.append(
-            KeywordExtract(
-                text=text,
-                max_keywords=max_keywords,
-                language=language,
-                extract_template=extract_template,
+            :param text: Text to extract keywords from.
+            :param max_keywords: Maximum number of keywords to extract.
+            :param language: Language of the text.
+            :param extract_template: Template for keyword extraction.
+            :return: Self-instance for chaining.
+            """
+            log.info("Adding KeywordExtract operator with text: {}, max_keywords: {}, language: {}, extract_template: {}.".format(text, max_keywords, language, extract_template))
+            self.pipeline._operators.append(
+                KeywordExtract(
+                    text=text,
+                    max_keywords=max_keywords,
+                    language=language,
+                    extract_template=extract_template,
+                )
             )
-        )
-        log.info("KeywordExtract operator added successfully.")
-        return self
-
-    @listen(extract_keywords)
-    def import_schema(self, graph_name: str):
-        log.info(f"Adding SchemaManager operator for graph: {graph_name}.")
-        self._operators.append(SchemaManager(graph_name))
-        log.info("SchemaManager operator added successfully.")
-        return self
-
-    @listen(import_schema)
-    def keywords_to_vid(
-        self,
-        by: Literal["query", "keywords"] = "keywords",
-        topk_per_keyword: int = huge_settings.topk_per_keyword,
-        topk_per_query: int = 10,
-    ):
-        """
-        Add a semantic ID query operator to the pipeline.
-        :param by: Match by query or keywords.
-        :param topk_per_keyword: Top K results per keyword.
-        :param topk_per_query: Top K results per query.
-        :return: Self-instance for chaining.
-        """
-        log.info("Adding SemanticIdQuery operator with by: {}, topk_per_keyword: {}, topk_per_query: {}.".format(by, topk_per_keyword, topk_per_query))
-        self._operators.append(
-            SemanticIdQuery(
-                embedding=self._embedding,
-                by=by,
-                topk_per_keyword=topk_per_keyword,
-                topk_per_query=topk_per_query,
+            log.info("KeywordExtract operator added successfully.")
+            return self
+        
+        def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            log.info("KeywordExtractAgent: Calling extract_keywords()")
+            self.extract_keywords(
+                text=context.get("text"),
+                max_keywords=context.get("max_keywords", 5),
+                language=context.get("language", "english"),
+                extract_template=context.get("extract_template")
             )
-        )
-        log.info("SemanticIdQuery operator added successfully.")
-        return self
+            operator = self.pipeline._operators[-1]
+            log.info("KeywordExtractAgent: Executing operator: {}".format(operator.__class__.__name__))
+            context = operator.run(context)
+            return context
+        
+    @listen(KeywordExtractAgent.run)
+    class SchemaManagerAgent(BaseAgent):
+        def __init__(self, pipeline: "RAGPipeline"):
+            self.pipeline = pipeline
+            self.name = "SchemaManagerAgent"
 
-    @listen(keywords_to_vid)
-    def query_graphdb(
-        self,
-        max_deep: int = 2,
-        max_graph_items: int = huge_settings.max_graph_items,
-        max_v_prop_len: int = 2048,
-        max_e_prop_len: int = 256,
-        prop_to_match: Optional[str] = None,
-        num_gremlin_generate_example: Optional[int] = 1,
-        gremlin_prompt: Optional[str] = prompt.gremlin_generate_prompt,
-    ):
-        """
-        Add a graph RAG query operator to the pipeline.
+        def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            log.info("SchemaManagerAgent: Calling import_schema()")
+            self.import_schema(graph_name=context.get("graph_name", "default_graph"))
+            operator = self.pipeline._operators[-1]
+            log.info("SchemaManagerAgent: Executing operator: {}".format(operator.__class__.__name__))
+            context = operator.run(context)
+            return context
 
-        :param max_deep: Maximum depth for the graph query.
-        :param max_graph_items: Maximum number of items to retrieve.
-        :param max_v_prop_len: Maximum length of vertex properties.
-        :param max_e_prop_len: Maximum length of edge properties.
-        :param prop_to_match: Property to match in the graph.
-        :param num_gremlin_generate_example: Number of examples to generate.
-        :param gremlin_prompt: Gremlin prompt for generating examples.
-        :return: Self-instance for chaining.
-        """
-        log.info("Adding GraphRAGQuery operator with max_deep: {}, max_graph_items: {}, max_v_prop_len: {}, max_e_prop_len: {}, prop_to_match: {}, num_gremlin_generate_example: {}.".format(max_deep, max_graph_items, max_v_prop_len, max_e_prop_len, prop_to_match, num_gremlin_generate_example))
-        self._operators.append(
-            GraphRAGQuery(
-                max_deep=max_deep,
-                max_graph_items=max_graph_items,
-                max_v_prop_len=max_v_prop_len,
-                max_e_prop_len=max_e_prop_len,
-                prop_to_match=prop_to_match,
-                num_gremlin_generate_example=num_gremlin_generate_example,
-                gremlin_prompt=gremlin_prompt,
+        def import_schema(self, graph_name: str):
+            log.info(f"Adding SchemaManager operator for graph: {graph_name}.")
+            self.pipeline._operators.append(SchemaManager(graph_name))
+            log.info("SchemaManager operator added successfully.")
+            return self
+        
+    @listen(SchemaManagerAgent.run)
+    class SemanticIdQueryAgent(BaseAgent):
+        def __init__(self, pipeline: "RAGPipeline"):
+            self.pipeline = pipeline
+            self.name = "SemanticIdQueryAgent"
+
+        def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            log.info("SemanticIdQueryAgent: Calling keywords_to_vid()")
+            self.keywords_to_vid(
+                by=context.get("by", "keywords"),
+                topk_per_keyword=context.get("topk_per_keyword", huge_settings.topk_per_keyword),
+                topk_per_query=context.get("topk_per_query", 10)
             )
-        )
-        log.info("GraphRAGQuery operator added successfully.")
-        return self
+            operator = self.pipeline._operators[-1]
+            log.info("SemanticIdQueryAgent: Executing operator: {}".format(operator.__class__.__name__))
+            context = operator.run(context)
+            return context
 
-    @listen(query_graphdb)
-    def query_vector_index(self, max_items: int = 3):
-        """
-        Add a vector index query operator to the pipeline.
-
-        :param max_items: Maximum number of items to retrieve.
-        :return: Self-instance for chaining.
-        """
-        log.info("Adding VectorIndexQuery operator with max_items: {}.".format(max_items))
-        self._operators.append(
-            VectorIndexQuery(
-                embedding=self._embedding,
-                topk=max_items,
+        def keywords_to_vid(
+            self,
+            by: Literal["query", "keywords"] = "keywords",
+            topk_per_keyword: int = huge_settings.topk_per_keyword,
+            topk_per_query: int = 10,
+        ):
+            """
+            Add a semantic ID query operator to the pipeline.
+            :param by: Match by query or keywords.
+            :param topk_per_keyword: Top K results per keyword.
+            :param topk_per_query: Top K results per query.
+            :return: Self-instance for chaining.
+            """
+            log.info("Adding SemanticIdQuery operator with by: {}, topk_per_keyword: {}, topk_per_query: {}.".format(by, topk_per_keyword, topk_per_query))
+            self.pipeline._operators.append(
+                SemanticIdQuery(
+                    embedding=self.pipeline._embedding,
+                    by=by,
+                    topk_per_keyword=topk_per_keyword,
+                    topk_per_query=topk_per_query,
+                )
             )
-        )
-        log.info("VectorIndexQuery operator added successfully.")
-        return self
+            log.info("SemanticIdQuery operator added successfully.")
+            return self
+        
+    @listen(SemanticIdQueryAgent.run)
+    class GraphQueryAgent(BaseAgent):
+        def __init__(self, pipeline: "RAGPipeline"):
+            self.pipeline = pipeline
+            self.name = "GraphQueryAgent"
 
-    @listen(query_vector_index)
-    def merge_dedup_rerank(
-        self,
-        graph_ratio: float = 0.5,
-        rerank_method: Literal["bleu", "reranker"] = "bleu",
-        near_neighbor_first: bool = False,
-        custom_related_information: str = "",
-    ):
-        """
-        Add a merge, deduplication, and rerank operator to the pipeline.
-
-        :return: Self-instance for chaining.
-        """
-        log.info("Adding MergeDedupRerank operator with graph_ratio: {}, rerank_method: {}, near_neighbor_first: {}, custom_related_information: {}.".format(graph_ratio, rerank_method, near_neighbor_first, custom_related_information))
-        self._operators.append(
-            MergeDedupRerank(
-                embedding=self._embedding,
-                graph_ratio=graph_ratio,
-                method=rerank_method,
-                near_neighbor_first=near_neighbor_first,
-                custom_related_information=custom_related_information,
+        def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            log.info("GraphQueryAgent: Calling query_graphdb()")
+            self.query_graphdb(
+                max_deep=context.get("max_deep", 2),
+                max_graph_items=context.get("max_graph_items", huge_settings.max_graph_items),
+                max_v_prop_len=context.get("max_v_prop_len", 2048),
+                max_e_prop_len=context.get("max_e_prop_len", 256),
+                prop_to_match=context.get("prop_to_match"),
+                num_gremlin_generate_example=context.get("num_gremlin_generate_example", 1),
+                gremlin_prompt=context.get("gremlin_prompt", prompt.gremlin_generate_prompt)
             )
-        )
-        log.info("MergeDedupRerank operator added successfully.")
-        return self
+            operator = self.pipeline._operators[-1]
+            log.info("GraphQueryAgent: Executing operator: {}".format(operator.__class__.__name__))
+            context = operator.run(context)
+            return context
 
-    @start(merge_dedup_rerank)
-    def synthesize_answer(
-        self,
-        raw_answer: bool = False,
-        vector_only_answer: bool = True,
-        graph_only_answer: bool = False,
-        graph_vector_answer: bool = False,
-        answer_prompt: Optional[str] = None,
-    ):
-        """
-        Add an answer synthesis operator to the pipeline.
+        def query_graphdb(
+            self,
+            max_deep: int = 2,
+            max_graph_items: int = huge_settings.max_graph_items,
+            max_v_prop_len: int = 2048,
+            max_e_prop_len: int = 256,
+            prop_to_match: Optional[str] = None,
+            num_gremlin_generate_example: Optional[int] = 1,
+            gremlin_prompt: Optional[str] = prompt.gremlin_generate_prompt,
+        ):
+            """
+            Add a graph RAG query operator to the pipeline.
 
-        :param raw_answer: Whether to return raw answers.
-        :param vector_only_answer: Whether to return vector-only answers.
-        :param graph_only_answer: Whether to return graph-only answers.
-        :param graph_vector_answer: Whether to return graph-vector combined answers.
-        :param answer_prompt: Template for the answer synthesis prompt.
-        :return: Self-instance for chaining.
-        """
-        self._operators.append(
-            AnswerSynthesize(
-                raw_answer=raw_answer,
-                vector_only_answer=vector_only_answer,
-                graph_only_answer=graph_only_answer,
-                graph_vector_answer=graph_vector_answer,
-                prompt_template=answer_prompt,
+            :param max_deep: Maximum depth for the graph query.
+            :param max_graph_items: Maximum number of items to retrieve.
+            :param max_v_prop_len: Maximum length of vertex properties.
+            :param max_e_prop_len: Maximum length of edge properties.
+            :param prop_to_match: Property to match in the graph.
+            :param num_gremlin_generate_example: Number of examples to generate.
+            :param gremlin_prompt: Gremlin prompt for generating examples.
+            :return: Self-instance for chaining.
+            """
+            log.info("Adding GraphRAGQuery operator with max_deep: {}, max_graph_items: {}, max_v_prop_len: {}, max_e_prop_len: {}, prop_to_match: {}, num_gremlin_generate_example: {}.".format(max_deep, max_graph_items, max_v_prop_len, max_e_prop_len, prop_to_match, num_gremlin_generate_example))
+            self.pipeline._operators.append(
+                GraphRAGQuery(
+                    max_deep=max_deep,
+                    max_graph_items=max_graph_items,
+                    max_v_prop_len=max_v_prop_len,
+                    max_e_prop_len=max_e_prop_len,
+                    prop_to_match=prop_to_match,
+                    num_gremlin_generate_example=num_gremlin_generate_example,
+                    gremlin_prompt=gremlin_prompt,
+                )
             )
-        )
-        return self
+            log.info("GraphRAGQuery operator added successfully.")
+            return self
+        
+    @listen(GraphQueryAgent.run)
+    class VectorIndexAgent(BaseAgent):
+        def __init__(self, pipeline: "RAGPipeline"):
+            self.pipeline = pipeline
+            self.name = "VectorIndexAgent"
 
-    @start(synthesize_answer)
-    def print_result(self):
-        """
-        Add a print result operator to the pipeline.
+        def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            log.info("VectorIndexAgent: Calling query_vector_index()")
+            self.query_vector_index(max_items=context.get("max_items", 3))
+            operator = self.pipeline._operators[-1]
+            log.info("VectorIndexAgent: Executing operator: {}".format(operator.__class__.__name__))
+            context = operator.run(context)
+            return context
 
-        :return: Self-instance for chaining.
-        """
-        self._operators.append(PrintResult())
-        return self
+        def query_vector_index(self, max_items: int = 3):
+            """
+            Add a vector index query operator to the pipeline.
+
+            :param max_items: Maximum number of items to retrieve.
+            :return: Self-instance for chaining.
+            """
+            log.info("Adding VectorIndexQuery operator with max_items: {}.".format(max_items))
+            self.pipeline._operators.append(
+                VectorIndexQuery(
+                    embedding=self.pipeline._embedding,
+                    topk=max_items,
+                )
+            )
+            log.info("VectorIndexQuery operator added successfully.")
+            return self
+
+    @listen(VectorIndexAgent.run)
+    class MergeDedupRerankAgent(BaseAgent):
+        def __init__(self, pipeline: "RAGPipeline"):
+            self.pipeline = pipeline
+            self.name = "MergeDedupRerankAgent"
+
+        def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            log.info("MergeDedupRerankAgent: Calling merge_dedup_rerank()")
+            self.merge_dedup_rerank(
+                graph_ratio=context.get("graph_ratio", 0.5),
+                rerank_method=context.get("rerank_method", "bleu"),
+                near_neighbor_first=context.get("near_neighbor_first", False),
+                custom_related_information=context.get("custom_related_information", "")
+            )
+            operator = self.pipeline._operators[-1]
+            log.info("MergeDedupRerankAgent: Executing operator: {}".format(operator.__class__.__name__))
+            context = operator.run(context)
+            return context
+        
+        def merge_dedup_rerank(
+            self,
+            graph_ratio: float = 0.5,
+            rerank_method: Literal["bleu", "reranker"] = "bleu",
+            near_neighbor_first: bool = False,
+            custom_related_information: str = "",
+        ):
+            """
+            Add a merge, deduplication, and rerank operator to the pipeline.
+
+            :return: Self-instance for chaining.
+            """
+            log.info("Adding MergeDedupRerank operator with graph_ratio: {}, rerank_method: {}, near_neighbor_first: {}, custom_related_information: {}.".format(graph_ratio, rerank_method, near_neighbor_first, custom_related_information))
+            self.pipeline._operators.append(
+                MergeDedupRerank(
+                    embedding=self.pipeline._embedding,
+                    graph_ratio=graph_ratio,
+                    method=rerank_method,
+                    near_neighbor_first=near_neighbor_first,
+                    custom_related_information=custom_related_information,
+                )
+            )
+            log.info("MergeDedupRerank operator added successfully.")
+            return self
+        
+    @listen(MergeDedupRerank.run)
+    class AnswerSynthesisAgent(BaseAgent):
+        def __init__(self, pipeline: "RAGPipeline"):
+            self.pipeline = pipeline
+            self.name = "AnswerSynthesisAgent"
+
+        def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            log.info("AnswerSynthesisAgent: Calling synthesize_answer()")
+            self.synthesize_answer(
+                raw_answer=context.get("raw_answer", False),
+                vector_only_answer=context.get("vector_only_answer", True),
+                graph_only_answer=context.get("graph_only_answer", False),
+                graph_vector_answer=context.get("graph_vector_answer", False),
+                answer_prompt=context.get("answer_prompt")
+            )
+            operator = self.pipeline._operators[-1]
+            log.info("AnswerSynthesisAgent: Executing operator: {}".format(operator.__class__.__name__))
+            context = operator.run(context)
+            return context
+
+        def synthesize_answer(
+            self,
+            raw_answer: bool = False,
+            vector_only_answer: bool = True,
+            graph_only_answer: bool = False,
+            graph_vector_answer: bool = False,
+            answer_prompt: Optional[str] = None,
+        ):
+            """
+            Add an answer synthesis operator to the pipeline.
+
+            :param raw_answer: Whether to return raw answers.
+            :param vector_only_answer: Whether to return vector-only answers.
+            :param graph_only_answer: Whether to return graph-only answers.
+            :param graph_vector_answer: Whether to return graph-vector combined answers.
+            :param answer_prompt: Template for the answer synthesis prompt.
+            :return: Self-instance for chaining.
+            """
+            self.pipeline._operators.append(
+                AnswerSynthesize(
+                    raw_answer=raw_answer,
+                    vector_only_answer=vector_only_answer,
+                    graph_only_answer=graph_only_answer,
+                    graph_vector_answer=graph_vector_answer,
+                    prompt_template=answer_prompt,
+                )
+            )
+            return self
+
+    @listen(AnswerSynthesisAgent.run)
+    class PrintResultAgent(BaseAgent):
+        def __init__(self, pipeline: "RAGPipeline"):
+            self.pipeline = pipeline
+            self.name = "PrintResultAgent"
+
+        def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            log.info("PrintResultAgent: Calling print_result()")
+            self.print_result()
+            operator = self.pipeline._operators[-1]
+            log.info("PrintResultAgent: Executing operator: {}".format(operator.__class__.__name__))
+            context = operator.run(context)
+            return context
+        
+        def print_result(self):
+            """
+            Add a print result operator to the pipeline.
+
+            :return: Self-instance for chaining.
+            """
+            self.pipeline._operators.append(PrintResult())
+            return self
 
     @log_time("total time")
     @record_qps
@@ -366,62 +459,34 @@ class RAGPipeline:
         :return: Final context after all operators have been executed.
         """
         if len(self._operators) == 0:
-            self.extract_keywords().query_graphdb().synthesize_answer()
+            # self.AnswerSynthesisAgent.synthesize_answer(self.GraphQueryAgent.query_graphdb(self.KeywordExtractAgent.extract_keywords()))
+            # self.extract_keywords().query_graphdb(
+            #     max_graph_items=kwargs.get('max_graph_items')
+            # ).synthesize_answer()
+            self.KeywordExtractAgent.extract_keywords(
+            text=kwargs.get("text"),
+            max_keywords=kwargs.get("max_keywords", 5),
+            language=kwargs.get("language", "english"),
+            extract_template=kwargs.get("extract_template")
+            )
+            self.GraphQueryAgent.query_graphdb(
+                max_graph_items=kwargs.get("max_graph_items", huge_settings.max_graph_items)
+            )
+            self.AnswerSynthesisAgent.synthesize_answer(
+                raw_answer=kwargs.get("raw_answer", False),
+                vector_only_answer=kwargs.get("vector_only_answer", True),
+                graph_only_answer=kwargs.get("graph_only_answer", False),
+                graph_vector_answer=kwargs.get("graph_vector_answer", False),
+                answer_prompt=kwargs.get("answer_prompt")
+            )
+            # log.info("No operators pre-populated; proceeding with agent chain execution using provided context.")
 
         log.info("Running pipeline with context: {}".format(kwargs))
-        context = kwargs        
-
-
-        # for operator in self._operators:            
-        #     log.info(f"Running operator: {operator.__class__.__name__}")
-
-        #     context = self._run_operator(operator, context)
-        # return context
-    
-        # Use CrewAI Flow to manage operator execution
-        flow = Flow()  # Instantiate CrewAI's Flow object
-
-        # Run the flow with the current context
-        context = flow.kickoff(context)        
+        context = kwargs          
+        
+        context = RAGPipeline.BaseAgent("BaseAgent").run_with_agents(**context)
+             
         log.info("Pipeline run completed with final context: {}".format(context))
         return context        
 
-    @log_operator_time
-    def _run_operator(self, operator, context):
-        log.info(f"Executing operator: {operator.__class__.__name__}")
-        try:
-            result = operator.run(context)
-            log.info(f"Operator {operator.__class__.__name__} executed successfully.")
-            return result
-        except Exception as e:
-            log.error(f"Error executing operator {operator.__class__.__name__}: {str(e)}")
-            raise
 
-    # -----------------------------------
-    # Agent System Integration (Demo)
-    # -----------------------------------
-    def run_agents(self, **kwargs) -> Dict[str, Any]:
-        """
-        Runs the query process using a simple agent system.
-        """
-        log.info("Starting agent-based execution.")
-        context = kwargs
-        # Instantiate agents with a reference to the pipeline where needed.
-        agents = [
-            QueryRouterAgent(),
-            Text2GQLAgent(self),
-            KeywordExtractionAgent(self),
-            GraphRetrievalAgent(self),
-            AnswerSynthesisAgent(self)
-        ]
-        executor = AgentExecutor(agents)
-        context = executor.execute(context)
-        log.info("Agent-based execution completed with context: {}".format(context))
-        return context
-
-    @log_time("total agent time")
-    def run_with_agents(self, **kwargs) -> Dict[str, Any]:
-        """
-        Entry point for running the pipeline using agents.
-        """
-        return self.run_agents(**kwargs)
