@@ -190,7 +190,6 @@ class GraphRAGQuery:
             
             log.info("Running gremlin generate query with context: %s", context)
             
-            start_time = time.time()
             # Inject a reference to self so agents can call internal methods.
             context["graph_obj"] = self
 
@@ -202,8 +201,11 @@ class GraphRAGQuery:
                 GraphRAGQuery.AnswerSynthesisAgent("AnswerSynthesisAgent", self.graph_obj)
             ]
             
+            start_time = time.time()
+            
             # Create a CrewAgentExecutor and kickoff the flow.
             CrewAgentExecutor.invoke(agents)
+            
             log.info("CrewAI Agent Workflow: Completed execution in %.2f seconds. Final context: %s", time.time() - start_time, context)
             log.debug("Final context details: %s", context)
 
@@ -271,6 +273,13 @@ class GraphRAGQuery:
                 log.error("Error executing gremlin query: %s", e)
 
                 context["graph_result"] = ""
+            return context
+        
+        def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
+            start_time = time.time()
+            log.info("GremlinQueryAgent: Running gremlin generate query.")
+            context = self._gremlin_generate_query(context)
+            log.info("GremlinQueryAgent: Completed in %.2f seconds.", time.time() - start_time)
             return context
     
     @listen(QueryRouterAgent.run)
