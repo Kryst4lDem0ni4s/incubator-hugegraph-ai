@@ -75,24 +75,56 @@ def rag_answer(
         gr.Warning("Please select at least one generate mode.")
         return "", "", "", ""
 
+    """
+    Instead of chaining the calls directly on the pipeline (which no longer works), 
+    we now call each method separately to populate the _operators list. 
+    This ensures that all necessary operators (for vector search, graph search, merge/dedup, synthesis)
+    are added before running the agent chain.
+    """
     rag = RAGPipeline()
-    if vector_search:
-        rag.query_vector_index()
-    if graph_search:
-        rag.extract_keywords(extract_template=keywords_extract_prompt).keywords_to_vid().import_schema(
-            huge_settings.graph_name
-        ).query_graphdb(
-            num_gremlin_generate_example=gremlin_tmpl_num,
-            gremlin_prompt=gremlin_prompt,
-        )
-    # TODO: add more user-defined search strategies
-    rag.merge_dedup_rerank(
-        graph_ratio,
-        rerank_method,
-        near_neighbor_first,
-    )
-    rag.synthesize_answer(raw_answer, vector_only_answer, graph_only_answer, graph_vector_answer, answer_prompt)
+    # if vector_search:
+    #     rag.query_vector_index()
+    # if graph_search:
+    #     rag.extract_keywords(extract_template=keywords_extract_prompt).keywords_to_vid().import_schema(
+    #         huge_settings.graph_name
+    #     ).query_graphdb(
+    #         num_gremlin_generate_example=gremlin_tmpl_num,
+    #         gremlin_prompt=gremlin_prompt,
+    #     )
+    # # TODO: add more user-defined search strategies
+    # rag.merge_dedup_rerank(
+    #     graph_ratio,
+    #     rerank_method,
+    #     near_neighbor_first,
+    # )
+    # rag.synthesize_answer(raw_answer, vector_only_answer, graph_only_answer, graph_vector_answer, answer_prompt)
 
+    # Build a context dictionary with all required parameters.
+    context = {
+        "query": text,
+        "text": text,  # Used by word and keyword extraction.
+        "raw_answer": raw_answer,
+        "vector_only_answer": vector_only_answer,
+        "graph_only_answer": graph_only_answer,
+        "graph_vector_answer": graph_vector_answer,
+        "graph_ratio": graph_ratio,
+        "rerank_method": rerank_method,
+        "near_neighbor_first": near_neighbor_first,
+        "custom_related_information": custom_related_information,
+        "answer_prompt": answer_prompt,
+        "extract_template": keywords_extract_prompt,
+        "num_gremlin_generate_example": gremlin_tmpl_num,
+        "gremlin_prompt": gremlin_prompt,
+        "max_graph_items": huge_settings.max_graph_items,  # or get from kwargs if needed
+        "vector_search": vector_search,
+        "graph_search": graph_search,
+        "max_keywords": 5,  # Default value
+        "language": "english",  # Default value
+    }
+    
+    # Instantiate the RAGPipeline and run the agent chain.
+    rag = RAGPipeline()
+    
     try:
         context = rag.run(verbose=True, query=text, vector_search=vector_search, graph_search=graph_search)
         if context.get("switch_to_bleu"):
@@ -109,7 +141,6 @@ def rag_answer(
     except Exception as e:
         log.critical(e)
         raise gr.Error(f"An unexpected error occurred: {str(e)}")
-
 
 def create_rag_block():
     # pylint: disable=R0915 (too-many-statements),C0301

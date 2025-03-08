@@ -60,10 +60,10 @@ class RAGPipeline:
         
     class BaseAgent:
         """A simple base class for agents."""
-        def __init__(self, name: str):
+        def __init__(self, name: str, pipeline: "RAGPipeline"):
             super.__init__()
             self.name = name
-
+            self.pipeline = pipeline
         
         def run_agents(self, **kwargs) -> Dict[str, Any]:
             """
@@ -73,15 +73,48 @@ class RAGPipeline:
             context = kwargs
             # Instantiate agents with a reference to the pipeline where needed.
             agents = [
-                RAGPipeline.WordExtractAgent(self),
-                RAGPipeline.KeywordExtractAgent(self),
-                RAGPipeline.SchemaManagerAgent(self),
-                RAGPipeline.SemanticIdQueryAgent(self),
-                RAGPipeline.GraphQueryAgent(self),
-                RAGPipeline.VectorIndexAgent(self),
-                RAGPipeline.MergeDedupRerankAgent(self),
-                RAGPipeline.AnswerSynthesisAgent(self),
-                RAGPipeline.PrintResultAgent(self),
+                RAGPipeline.WordExtractAgent(self.pipeline, context.get("text"), context.get("language", "english")),
+                RAGPipeline.KeywordExtractAgent(
+                    self.pipeline,
+                    text=context.get("text"),
+                    max_keywords=context.get("max_keywords", 5),
+                    language=context.get("language", "english"),
+                    extract_template=context.get("extract_template"),
+                ),
+                RAGPipeline.SchemaManagerAgent(self.pipeline, context.get("graph_name", "default_graph")),
+                RAGPipeline.SemanticIdQueryAgent(
+                    self.pipeline,
+                    by=context.get("by", "keywords"),
+                    topk_per_keyword=context.get("topk_per_keyword", huge_settings.topk_per_keyword),
+                    topk_per_query=context.get("topk_per_query", 10),
+                ),
+                RAGPipeline.GraphQueryAgent(
+                    self.pipeline,
+                    max_deep=context.get("max_deep", 2),
+                    max_graph_items=context.get("max_graph_items", huge_settings.max_graph_items),
+                    max_v_prop_len=context.get("max_v_prop_len", 2048),
+                    max_e_prop_len=context.get("max_e_prop_len", 256),
+                    prop_to_match=context.get("prop_to_match"),
+                    num_gremlin_generate_example=context.get("num_gremlin_generate_example", 1),
+                    gremlin_prompt=context.get("gremlin_prompt", prompt.gremlin_generate_prompt),
+                ),
+                RAGPipeline.VectorIndexAgent(self.pipeline, context.get("max_items", 3)),
+                RAGPipeline.MergeDedupRerankAgent(
+                    self.pipeline,
+                    graph_ratio=context.get("graph_ratio", 0.5),
+                    rerank_method=context.get("rerank_method", "bleu"),
+                    near_neighbor_first=context.get("near_neighbor_first", False),
+                    custom_related_information=context.get("custom_related_information", ""),
+                ),
+                RAGPipeline.AnswerSynthesisAgent(
+                    self.pipeline,
+                    vector_only_answer=context.get("vector_only_answer", True),
+                    graph_only_answer=context.get("graph_only_answer", False),
+                    graph_vector_answer=context.get("graph_vector_answer", False),
+                    raw_answer=context.get("raw_answer", False),
+                    answer_prompt=context.get("answer_prompt"),
+                ),
+                RAGPipeline.PrintResultAgent(self.pipeline),
             ]
             executor = RAGPipeline.AgentExecutor(agents)
             context = executor.execute(context)
@@ -106,9 +139,12 @@ class RAGPipeline:
             return context
         
     class WordExtractAgent(BaseAgent):
-        def __init__(self, pipeline: "RAGPipeline"):
+        def __init__(self, pipeline: "RAGPipeline", text, language):
+            super().__init__("WordExtractAgent", pipeline)
             self.pipeline = pipeline
             self.name = "WordExtractAgent"
+            self.text = text
+            self.language = language
         
         def extract_word(self, text: Optional[str] = None, language: str = "english"):
             """
@@ -135,9 +171,14 @@ class RAGPipeline:
         
     @listen(WordExtractAgent.run)
     class KeywordExtractAgent(BaseAgent):
-        def __init__(self, pipeline: "RAGPipeline"):
+        def __init__(self, pipeline: "RAGPipeline", text: str = "", max_keywords=5, language="english", extract_template=None):
+            super().__init__("KeywordExtractAgent", pipeline)
             self.pipeline = pipeline
             self.name = "KeywordExtractAgent"
+            self.text = text
+            self.max_keywords = max_keywords
+            self.language = language
+            self.extract_template = extract_template
 
         def extract_keywords(
             self,
@@ -182,9 +223,11 @@ class RAGPipeline:
         
     @listen(KeywordExtractAgent.run)
     class SchemaManagerAgent(BaseAgent):
-        def __init__(self, pipeline: "RAGPipeline"):
+        def __init__(self, pipeline: "RAGPipeline", graph_name):
+            super().__init__("SchemaManagerAgent", pipeline)
             self.pipeline = pipeline
             self.name = "SchemaManagerAgent"
+            self.graph_name = graph_name
 
         def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
             log.info("SchemaManagerAgent: Calling import_schema()")
@@ -202,9 +245,13 @@ class RAGPipeline:
         
     @listen(SchemaManagerAgent.run)
     class SemanticIdQueryAgent(BaseAgent):
-        def __init__(self, pipeline: "RAGPipeline"):
+        def __init__(self, pipeline: "RAGPipeline", by, topk_per_keyword, topk_per_query):
+            super().__init__("SemanticIdQueryAgent", pipeline)
             self.pipeline = pipeline
             self.name = "SemanticIdQueryAgent"
+            self.by = by
+            self.topk_per_keyword = topk_per_keyword
+            self.topk_per_query = topk_per_query
 
         def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
             log.info("SemanticIdQueryAgent: Calling keywords_to_vid()")
@@ -245,10 +292,18 @@ class RAGPipeline:
         
     @listen(SemanticIdQueryAgent.run)
     class GraphQueryAgent(BaseAgent):
-        def __init__(self, pipeline: "RAGPipeline"):
+        def __init__(self, pipeline: "RAGPipeline", max_deep, max_graph_items, max_v_prop_len, max_e_prop_len, prop_to_match, num_gremlin_generate_example, gremlin_prompt):
+            super().__init__("GraphQueryAgent", pipeline)
             self.pipeline = pipeline
             self.name = "GraphQueryAgent"
-
+            self.max_deep = max_deep
+            self.max_graph_items = max_graph_items
+            self.max_v_prop_len = max_v_prop_len
+            self.max_e_prop_len = max_e_prop_len
+            self.prop_to_match = prop_to_match
+            self.num_gremlin_generate_example = num_gremlin_generate_example
+            self.gremlin_prompt = gremlin_prompt
+            
         def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
             log.info("GraphQueryAgent: Calling query_graphdb()")
             self.query_graphdb(
@@ -304,9 +359,11 @@ class RAGPipeline:
         
     @listen(GraphQueryAgent.run)
     class VectorIndexAgent(BaseAgent):
-        def __init__(self, pipeline: "RAGPipeline"):
+        def __init__(self, pipeline: "RAGPipeline", max_items):
+            super().__init__("VectorIndexAgent", pipeline)
             self.pipeline = pipeline
             self.name = "VectorIndexAgent"
+            self.max_items = max_items
 
         def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
             log.info("VectorIndexAgent: Calling query_vector_index()")
@@ -335,9 +392,14 @@ class RAGPipeline:
 
     @listen(VectorIndexAgent.run)
     class MergeDedupRerankAgent(BaseAgent):
-        def __init__(self, pipeline: "RAGPipeline"):
+        def __init__(self, pipeline: "RAGPipeline", graph_ratio, rerank_method, near_neighbor_first, custom_related_information):
+            super().__init__("MergeDedupRerankAgent", pipeline)
             self.pipeline = pipeline
             self.name = "MergeDedupRerankAgent"
+            self.graph_ratio = graph_ratio
+            self.rerank_method  = rerank_method
+            self.near_neighbor_first = near_neighbor_first
+            self.custom_related_information = custom_related_information
 
         def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
             log.info("MergeDedupRerankAgent: Calling merge_dedup_rerank()")
@@ -379,9 +441,15 @@ class RAGPipeline:
         
     @listen(MergeDedupRerank.run)
     class AnswerSynthesisAgent(BaseAgent):
-        def __init__(self, pipeline: "RAGPipeline"):
+        def __init__(self, pipeline: "RAGPipeline", vector_only_answer, graph_only_answer, graph_vector_answer, raw_answer, answer_prompt):
+            super().__init__("AnswerSynthesisAgent", pipeline)
             self.pipeline = pipeline
             self.name = "AnswerSynthesisAgent"
+            self.vector_only_answer = vector_only_answer
+            self.graph_only_answer = graph_only_answer
+            self.graph_vector_answer = graph_vector_answer
+            self.raw_answer = raw_answer
+            self.answer_prompt = answer_prompt
 
         def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
             log.info("AnswerSynthesisAgent: Calling synthesize_answer()")
@@ -429,6 +497,7 @@ class RAGPipeline:
     @listen(AnswerSynthesisAgent.run)
     class PrintResultAgent(BaseAgent):
         def __init__(self, pipeline: "RAGPipeline"):
+            super().__init__("PrintResultAgent", pipeline)
             self.pipeline = pipeline
             self.name = "PrintResultAgent"
 
@@ -464,15 +533,18 @@ class RAGPipeline:
             #     max_graph_items=kwargs.get('max_graph_items')
             # ).synthesize_answer()
             self.KeywordExtractAgent.extract_keywords(
-            text=kwargs.get("text"),
-            max_keywords=kwargs.get("max_keywords", 5),
-            language=kwargs.get("language", "english"),
-            extract_template=kwargs.get("extract_template")
+                self=self,
+                text=kwargs.get("text"),
+                max_keywords=kwargs.get("max_keywords", 5),
+                language=kwargs.get("language", "english"),
+                extract_template=kwargs.get("extract_template")
             )
             self.GraphQueryAgent.query_graphdb(
+                self=self,
                 max_graph_items=kwargs.get("max_graph_items", huge_settings.max_graph_items)
             )
             self.AnswerSynthesisAgent.synthesize_answer(
+                self=self,
                 raw_answer=kwargs.get("raw_answer", False),
                 vector_only_answer=kwargs.get("vector_only_answer", True),
                 graph_only_answer=kwargs.get("graph_only_answer", False),
@@ -484,7 +556,7 @@ class RAGPipeline:
         log.info("Running pipeline with context: {}".format(kwargs))
         context = kwargs          
         
-        context = RAGPipeline.BaseAgent("BaseAgent").run_with_agents(**context)
+        context = RAGPipeline.BaseAgent("BaseAgent").run_with_agents(self=self, **context)
              
         log.info("Pipeline run completed with final context: {}".format(context))
         return context        
