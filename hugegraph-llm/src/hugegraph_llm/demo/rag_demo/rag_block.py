@@ -115,13 +115,11 @@ def rag_answer(
         "extract_template": keywords_extract_prompt,
         "num_gremlin_generate_example": gremlin_tmpl_num,
         "gremlin_prompt": gremlin_prompt,
-        "max_graph_items": huge_settings.max_graph_items,  # or get from kwargs if needed
+        "max_graph_items": huge_settings.max_graph_items,
         "vector_search": vector_search,
         "graph_search": graph_search,
         "max_keywords": 5,  # Default value
         "language": "english",  # Default value
-        "verbose": True,
-        "model_name": "openai"  # Add explicit model name
     }
     
     # Instantiate the RAGPipeline and run the agent chain.
