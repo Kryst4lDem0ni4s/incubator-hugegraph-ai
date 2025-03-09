@@ -120,6 +120,8 @@ def rag_answer(
         "graph_search": graph_search,
         "max_keywords": 5,  # Default value
         "language": "english",  # Default value
+        "verbose": True,
+        "model_name": "openai"  # Add explicit model name
     }
     
     # Instantiate the RAGPipeline and run the agent chain.

@@ -61,7 +61,7 @@ class RAGPipeline:
     class BaseAgent:
         """A simple base class for agents."""
         def __init__(self, name: str, pipeline: "RAGPipeline"):
-            super.__init__()
+            super().__init__()
             self.name = name
             self.pipeline = pipeline
         
@@ -114,7 +114,7 @@ class RAGPipeline:
                     raw_answer=context.get("raw_answer", False),
                     answer_prompt=context.get("answer_prompt"),
                 ),
-                RAGPipeline.PrintResultAgent(self.pipeline),
+                RAGPipeline.PrintResultAgent(self.pipeline, context=context),
             ]
             executor = RAGPipeline.AgentExecutor(agents)
             context = executor.execute(context)
@@ -200,6 +200,7 @@ class RAGPipeline:
             self.pipeline._operators.append(
                 KeywordExtract(
                     text=text,
+                    llm=self.pipeline._extract_llm,
                     max_keywords=max_keywords,
                     language=language,
                     extract_template=extract_template,
@@ -345,6 +346,8 @@ class RAGPipeline:
             log.info("Adding GraphRAGQuery operator with max_deep: {}, max_graph_items: {}, max_v_prop_len: {}, max_e_prop_len: {}, prop_to_match: {}, num_gremlin_generate_example: {}.".format(max_deep, max_graph_items, max_v_prop_len, max_e_prop_len, prop_to_match, num_gremlin_generate_example))
             self.pipeline._operators.append(
                 GraphRAGQuery(
+                    llm=self.pipeline._chat_llm,
+                    embedding=self.pipeline._embedding,
                     max_deep=max_deep,
                     max_graph_items=max_graph_items,
                     max_v_prop_len=max_v_prop_len,
@@ -485,6 +488,7 @@ class RAGPipeline:
             """
             self.pipeline._operators.append(
                 AnswerSynthesize(
+                    llm=self.pipeline._chat_llm,
                     raw_answer=raw_answer,
                     vector_only_answer=vector_only_answer,
                     graph_only_answer=graph_only_answer,
@@ -496,10 +500,11 @@ class RAGPipeline:
 
     @listen(AnswerSynthesisAgent.run)
     class PrintResultAgent(BaseAgent):
-        def __init__(self, pipeline: "RAGPipeline"):
+        def __init__(self, pipeline: "RAGPipeline", context):
             super().__init__("PrintResultAgent", pipeline)
             self.pipeline = pipeline
             self.name = "PrintResultAgent"
+            self.context = context
 
         def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
             log.info("PrintResultAgent: Calling print_result()")
@@ -527,31 +532,119 @@ class RAGPipeline:
         :param kwargs: Additional context to pass to operators.
         :return: Final context after all operators have been executed.
         """
+        context = kwargs
+        
+        context.update({
+        "chat_llm": self._chat_llm,
+        "extract_llm": self._extract_llm,
+        "text2gql_llm": self._text2gqlt_llm,
+        "chat_llm": self._chat_llm,
+        "embedding": self._embedding,
+        "graph_name": context.get("graph_name", "default_graph"),
+        "language": context.get("language", "english"),
+        "max_keywords": context.get("max_keywords", 5),
+        "max_deep": context.get("max_deep", 2),
+        "max_graph_items": context.get("max_graph_items", huge_settings.max_graph_items),
+        "max_v_prop_len": context.get("max_v_prop_len", 2048),
+        "max_e_prop_len": context.get("max_e_prop_len", 256),
+        })
+        
+        print("context in run method for RAGPipeline = ",context)
+        
         if len(self._operators) == 0:
+            
             # self.AnswerSynthesisAgent.synthesize_answer(self.GraphQueryAgent.query_graphdb(self.KeywordExtractAgent.extract_keywords()))
+            
             # self.extract_keywords().query_graphdb(
             #     max_graph_items=kwargs.get('max_graph_items')
             # ).synthesize_answer()
-            self.KeywordExtractAgent.extract_keywords(
-                self=self,
-                text=kwargs.get("text"),
-                max_keywords=kwargs.get("max_keywords", 5),
-                language=kwargs.get("language", "english"),
-                extract_template=kwargs.get("extract_template")
-            )
-            self.GraphQueryAgent.query_graphdb(
-                self=self,
-                max_graph_items=kwargs.get("max_graph_items", huge_settings.max_graph_items)
-            )
-            self.AnswerSynthesisAgent.synthesize_answer(
-                self=self,
-                raw_answer=kwargs.get("raw_answer", False),
-                vector_only_answer=kwargs.get("vector_only_answer", True),
-                graph_only_answer=kwargs.get("graph_only_answer", False),
-                graph_vector_answer=kwargs.get("graph_vector_answer", False),
-                answer_prompt=kwargs.get("answer_prompt")
-            )
+            # self.KeywordExtractAgent.extract_keywords(
+            #     self,
+            #     text=kwargs.get("text"),
+            #     max_keywords=kwargs.get("max_keywords", 5),
+            #     language=kwargs.get("language", "english"),
+            #     extract_template=kwargs.get("extract_template")
+            # )
+            # self.GraphQueryAgent.query_graphdb(
+            #     self,
+            #     max_graph_items=kwargs.get("max_graph_items", huge_settings.max_graph_items)
+            # )
+            # self.AnswerSynthesisAgent.synthesize_answer(
+            #     self,
+            #     raw_answer=kwargs.get("raw_answer", False),
+            #     vector_only_answer=kwargs.get("vector_only_answer", True),
+            #     graph_only_answer=kwargs.get("graph_only_answer", False),
+            #     graph_vector_answer=kwargs.get("graph_vector_answer", False),
+            #     answer_prompt=kwargs.get("answer_prompt")
+            # )
+            
             # log.info("No operators pre-populated; proceeding with agent chain execution using provided context.")
+            
+            # Directly add operators based on context
+            if kwargs.get("graph_search", False):
+                # Add keyword extraction
+                self._operators.append(
+                    KeywordExtract(
+                        text=context.get("text"),
+                        llm=context.get("extract_llm"),
+                        max_keywords=context.get("max_keywords", 5),
+                        language=context.get("language", "english"),
+                        extract_template=context.get("extract_template")
+                    )
+                )
+                
+                # Add graph query
+                self._operators.append(
+                    GraphRAGQuery(
+                        max_deep=context.get("max_deep", 2),
+                        max_graph_items=context.get("max_graph_items", huge_settings.max_graph_items),
+                        llm=context.get("chat_llm"),
+                        embedding=context.get("embedding"),
+                        max_v_prop_len=context.get("max_v_prop_len"),
+                        max_e_prop_len=context.get("max_e_prop_len"),
+                        prop_to_match=context.get("prop_to_match"),
+                        num_gremlin_generate_example=context.get("num_gremlin_generate_example"),
+                        gremlin_prompt=context.get("gremlin_prompt"),
+                    )
+                )
+            
+            if kwargs.get("vector_search", False):
+                # Add vector index query
+                self._operators.append(
+                    VectorIndexQuery(
+                        embedding=context.get("embedding"),
+                        topk=context.get("max_items", 3),
+                    )
+                )
+            
+            # Add merge/dedup/rerank if needed
+            if kwargs.get("graph_search", False) and kwargs.get("vector_search", False):
+                self._operators.append(
+                    MergeDedupRerank(
+                        embedding=context.get("embedding"),
+                        graph_ratio=context.get("graph_ratio", 0.5),
+                        method=context.get("rerank_method", "bleu"),
+                        near_neighbor_first=context.get("near_neighbor_first", False),
+                        custom_related_information=context.get("custom_related_information", ""),
+                    )
+                )
+            
+            # Add answer synthesis
+            self._operators.append(
+                AnswerSynthesize(
+                    llm=context.get("chat_llm"),
+                    raw_answer=context.get("raw_answer", False),
+                    vector_only_answer=context.get("vector_only_answer", True),
+                    graph_only_answer=context.get("graph_only_answer", False),
+                    graph_vector_answer=context.get("graph_vector_answer", False),
+                    prompt_template=context.get("answer_prompt"),
+                )
+            )
+            
+            # Execute operators
+            for operator in self._operators:
+                log.info(f"Executing operator: {operator.__class__.__name__}, with details: {operator}")
+                context = operator.run(context)
 
         log.info("Running pipeline with context: {}".format(kwargs))
         context = kwargs          

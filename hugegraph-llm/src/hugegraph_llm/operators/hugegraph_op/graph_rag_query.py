@@ -91,7 +91,8 @@ class GraphRAGQuery:
         num_gremlin_generate_example: Optional[int] = 1,
         gremlin_prompt: Optional[str] = None,
     ):
-        log.info("Initializing GraphRAGQuery with parameters: max_deep=%d, max_graph_items=%d, prop_to_match=%s, llm=%s, embedding=%s, max_v_prop_len=%d, max_e_prop_len=%d, num_gremlin_generate_example=%d, gremlin_prompt=%s", max_deep, max_graph_items, prop_to_match)
+        # log.info("Initializing GraphRAGQuery with parameters: max_deep=%d, max_graph_items=%d, prop_to_match=%s, llm=%s, embedding=%s, max_v_prop_len=%d, max_e_prop_len=%d, num_gremlin_generate_example=%d, gremlin_prompt=%s", max_deep, max_graph_items, prop_to_match)
+        log.info("Initializing GraphRAGQuery...")
         self._client = PyHugeClient(
 
             huge_settings.graph_ip,
